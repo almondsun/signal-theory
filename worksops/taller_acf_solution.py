@@ -17,6 +17,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
+# Frequency grid used for strict validity checks in the full analysis band [Hz].
+PSD_ANALYSIS_FREQ_MIN_HZ: float = -2.5
+PSD_ANALYSIS_FREQ_MAX_HZ: float = 2.5
+PSD_ANALYSIS_FREQ_SAMPLES: int = 8001
+
+# Frequency grid used for PSD plots, intentionally zoomed to avoid delta-like view [Hz].
+PSD_PLOT_FREQ_MIN_HZ: float = -0.8
+PSD_PLOT_FREQ_MAX_HZ: float = 0.8
+PSD_PLOT_FREQ_SAMPLES: int = 1201
+FFT_PLOT_PADDING_FACTOR: int = 16
+
 
 @dataclass(frozen=True)
 class ACFConfiguration:
@@ -121,6 +132,7 @@ def acf_spectrum_closed_form(
 def acf_spectrum_fft(
     tau_s: NDArray[np.float64],  # Lag axis where R(tau) is sampled [s]
     r_tau: NDArray[np.float64],  # ACF samples aligned with tau_s
+    n_fft: int | None = None,  # Optional FFT size for spectral interpolation
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:  # (f_hz, Re{FFT[R]})
     """Estimates S(f) numerically from sampled R(tau) using FFT.
 
@@ -131,6 +143,9 @@ def acf_spectrum_fft(
     Parameters:
         tau_s: Uniform lag grid in seconds.
         r_tau: ACF samples on ``tau_s``.
+        n_fft: Optional FFT length. If provided, must satisfy n_fft >= len(tau_s).
+            Internally, zero-padding is applied symmetrically on the lag axis to
+            preserve tau=0 alignment in the FFT.
 
     Returns:
         frequency_hz: Centered frequency axis in hertz.
@@ -152,11 +167,37 @@ def acf_spectrum_fft(
     delta_tau_s: float = float(tau_s[1] - tau_s[0])
     if delta_tau_s <= 0.0:
         raise ValueError("tau_s must be strictly increasing.")
+    if n_fft is None:
+        n_fft = tau_s.size
+    if n_fft < tau_s.size:
+        raise ValueError("n_fft must be greater than or equal to len(tau_s).")
+
+    # Build a centered lag sequence. For padded FFT, use symmetric padding so
+    # that tau=0 stays centered and no artificial phase distortion appears.
+    r_tau_work = r_tau
+    if n_fft > tau_s.size:
+        if n_fft % 2 == 0:
+            n_fft = n_fft + 1
+        pad_total = n_fft - tau_s.size
+        pad_left = pad_total // 2
+        pad_right = pad_total - pad_left
+        r_tau_work = np.pad(r_tau, (pad_left, pad_right), mode="constant")
 
     # Compute FFT with shift conventions so that tau=0 maps to centered spectrum.
-    spectrum_complex = delta_tau_s * np.fft.fftshift(np.fft.fft(np.fft.ifftshift(r_tau)))
-    frequency_hz = np.fft.fftshift(np.fft.fftfreq(tau_s.size, d=delta_tau_s))
+    spectrum_complex = delta_tau_s * np.fft.fftshift(
+        np.fft.fft(np.fft.ifftshift(r_tau_work))
+    )
+    frequency_hz = np.fft.fftshift(np.fft.fftfreq(n_fft, d=delta_tau_s))
     return frequency_hz.astype(np.float64), np.real(spectrum_complex).astype(np.float64)
+
+
+def next_power_of_two(
+    value: int,  # Positive integer
+) -> int:  # Smallest power of two greater than or equal to value
+    """Returns the next power of two used for efficient FFT padding."""
+    if value < 1:
+        raise ValueError("value must be at least 1.")
+    return 1 << (value - 1).bit_length()
 
 
 def build_toeplitz_from_acf(
@@ -249,9 +290,19 @@ def analyze_configuration(
     max_violation = float(r_global_max - r0_value)
 
     # Compute analytical and FFT spectra, then count negative samples.
-    frequency_hz_closed = np.linspace(-2.5, 2.5, 8001, dtype=np.float64)
+    frequency_hz_closed = np.linspace(
+        PSD_ANALYSIS_FREQ_MIN_HZ,
+        PSD_ANALYSIS_FREQ_MAX_HZ,
+        PSD_ANALYSIS_FREQ_SAMPLES,
+        dtype=np.float64,
+    )
     spectrum_closed = acf_spectrum_closed_form(frequency_hz=frequency_hz_closed, cfg=cfg)
-    frequency_hz_fft, spectrum_fft = acf_spectrum_fft(tau_s=tau_s, r_tau=r_tau)
+    n_fft_analysis = next_power_of_two(FFT_PLOT_PADDING_FACTOR * tau_s.size) + 1
+    frequency_hz_fft, spectrum_fft = acf_spectrum_fft(
+        tau_s=tau_s,
+        r_tau=r_tau,
+        n_fft=n_fft_analysis,
+    )
 
     min_spectrum_closed = float(np.min(spectrum_closed))
     min_spectrum_fft = float(np.min(spectrum_fft))
@@ -310,9 +361,27 @@ def plot_configuration(
 
     # Evaluate ACF and both spectral versions for side-by-side inspection.
     r_tau = acf_candidate(tau_s=tau_s, cfg=cfg)
-    frequency_hz_fft, spectrum_fft = acf_spectrum_fft(tau_s=tau_s, r_tau=r_tau)
-    frequency_hz_closed = np.linspace(-2.5, 2.5, 8001, dtype=np.float64)
+    n_fft_plot = next_power_of_two(FFT_PLOT_PADDING_FACTOR * tau_s.size) + 1
+    frequency_hz_fft_all, spectrum_fft_all = acf_spectrum_fft(
+        tau_s=tau_s,
+        r_tau=r_tau,
+        n_fft=n_fft_plot,
+    )
+    frequency_hz_closed = np.linspace(
+        PSD_PLOT_FREQ_MIN_HZ,
+        PSD_PLOT_FREQ_MAX_HZ,
+        PSD_PLOT_FREQ_SAMPLES,
+        dtype=np.float64,
+    )
     spectrum_closed = acf_spectrum_closed_form(frequency_hz=frequency_hz_closed, cfg=cfg)
+
+    # Keep only the zoomed plotting band with dense FFT sampling.
+    plot_mask = (
+        (frequency_hz_fft_all >= PSD_PLOT_FREQ_MIN_HZ)
+        & (frequency_hz_fft_all <= PSD_PLOT_FREQ_MAX_HZ)
+    )
+    frequency_hz_fft = frequency_hz_fft_all[plot_mask]
+    spectrum_fft = spectrum_fft_all[plot_mask]
 
     fig, axes = plt.subplots(1, 2, figsize=(13.5, 4.6))
 
@@ -334,6 +403,7 @@ def plot_configuration(
     axes[1].plot(frequency_hz_fft, spectrum_fft, lw=1.2, alpha=0.8, label="FFT estimate")
     axes[1].plot(frequency_hz_closed, negative_closed, lw=2.4, color="red", label="Negative region")
     axes[1].axhline(0.0, color="0.4", lw=1.0, linestyle=":")
+    axes[1].set_xlim(PSD_PLOT_FREQ_MIN_HZ, PSD_PLOT_FREQ_MAX_HZ)
     axes[1].set_title("PSD via Wiener-Khinchin")
     axes[1].set_xlabel("Frequency $f$ [Hz]")
     axes[1].set_ylabel("$S(f)$")
