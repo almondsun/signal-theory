@@ -1,0 +1,199 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  urlcolor=blue!50!black
+}
+
+\title{Validated Lab Guide\\Envelope Modulation of Random Signals}
+\author{Signal Theory Workshop 02}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Purpose}
+This guide is the validated and cleaned deliverable requested by the repository
+instructions. The refined brief in \texttt{docs/lab00\_.pdf} is treated as the
+main source of truth. The result preserves the exact stage names and the same
+subscript notation used in the original PDF while tightening the structure
+around parameters, estimators, and required outputs.
+
+\section*{Objective}
+Study how a white Gaussian input process evolves through a conventional AM
+communication chain:
+\begin{enumerate}[leftmargin=1.5em]
+  \item baseband generation by RC low-pass filtering,
+  \item conventional AM modulation,
+  \item envelope detection by rectification plus low-pass filtering.
+\end{enumerate}
+
+At every stage, estimate the autocorrelation function (ACF) and power spectral
+density (PSD), then compare the recovered signal with the original message.
+
+\section*{Signal Model}
+Let $x[n]$ be discrete-time white Gaussian noise:
+\[
+  x[n] \sim \mathcal{N}(0,1).
+\]
+
+The filtered message signal is denoted by $x_1[n]$. The conventional AM signal
+is
+\[
+  x_2[n] = (A_0 + x_1[n]) \cos(2\pi f_0 nT_s),
+\]
+with $T_s = 1/f_s$. The peak and RMS modulation indices are
+\[
+  \mu_{peak} = \frac{\max_n |x_1[n]|}{A_0},
+  \qquad
+  \mu_{rms} = \frac{\sigma_{x_1}}{A_0}.
+\]
+To avoid overmodulation on the observed record, require
+\[
+  \mu_{peak} < 1
+  \qquad \Longleftrightarrow \qquad
+  \min_n (A_0 + x_1[n]) > 0.
+\]
+
+Under the cycle-averaged interpretation from the lab statement, the AM ACF is
+\[
+  R_{x_2x_2}(\tau)
+  \approx
+  \left(
+    \frac{A_0^2}{2}
+    +
+    \frac{R_{x_1x_1}(\tau)}{2}
+  \right)
+  \cos(2\pi f_0 \tau),
+\]
+and the AM PSD contains the carrier and translated sidebands around $\pm f_0$.
+
+\section*{Parameter Selection}
+Use the recommended values from the original PDF, with validated adjustments:
+the executed notebook uses $A_0 = 6.0$ instead of $A_0 = 4.0$ because the
+original suggestion can violate $\mu_{peak} < 1$ on a long normalized Gaussian
+record, and it uses $f_{demod} = 300\,\text{Hz}$ so the discrete-time full-wave
+detector preserves the recovered envelope while still attenuating the main
+rectifier ripple around $2f_0 = 600\,\text{Hz}$.
+\begin{center}
+\begin{tabular}{>{\raggedright\arraybackslash}p{5.3cm} p{6.5cm}}
+\toprule
+Baseband cutoff & $f_n = 10\,\text{Hz}$ \\
+Carrier ratio & $k = 30$ \\
+Carrier frequency & $f_0 = k f_n = 300\,\text{Hz}$ \\
+Carrier amplitude & $A_0 = 6.0$ \\
+Sampling frequency & $f_s = 15{,}000\,\text{Hz}$ \\
+Observation time & $T = 50\,\text{s}$ \\
+Number of samples & $N = f_s T = 750{,}000$ \\
+Demodulator cutoff & $f_{demod} = 300\,\text{Hz}$ \\
+PSD method & Welch, Hann window, $N_{seg}=16384$, 50\% overlap \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{Required Stages}
+The Colab notebook must preserve these stage headings exactly:
+
+\subsection*{Stage 0: Generation of Input Signal}
+\begin{itemize}[leftmargin=1.5em]
+  \item Generate $x[n] \sim \mathcal{N}(0,1)$.
+  \item Estimate and plot $R_{xx}[\ell]$.
+  \item Estimate and plot $S_{xx}(f)$.
+\end{itemize}
+
+\subsection*{Stage 1: RC Low-Pass Filtering}
+\begin{itemize}[leftmargin=1.5em]
+  \item Filter $x[n]$ with a first-order RC-equivalent low-pass filter.
+  \item Obtain the message signal $x_1[n]$ and normalize it to unit variance.
+  \item Estimate and plot $R_{x_1x_1}[\ell]$ and $S_{x_1x_1}(f)$.
+  \item Compare against the reference RC shapes
+  \[
+    R_{x_1x_1}(\tau) \propto e^{-2\pi f_n |\tau|},
+    \qquad
+    S_{x_1x_1}(f) \propto \frac{1}{1 + (f/f_n)^2}.
+  \]
+\end{itemize}
+
+\subsection*{Stage 2: Conventional AM Modulation}
+\begin{itemize}[leftmargin=1.5em]
+  \item Form
+  \[
+    x_2[n] = (A_0 + x_1[n]) \cos(2\pi f_0 nT_s).
+  \]
+  \item Verify $\mu_{peak} < 1$ and report $\mu_{rms}$.
+  \item Plot the AM waveform with its envelope.
+  \item Estimate and plot $R_{x_2x_2}[\ell]$ and $S_{x_2x_2}(f)$.
+\end{itemize}
+
+\subsection*{Stage 3: Envelope Detection}
+\begin{itemize}[leftmargin=1.5em]
+  \item Rectify: $x_{rect}[n] = |x_2[n]|$.
+  \item Low-pass filter the rectified waveform to obtain $x_{env}[n]$.
+  \item Remove the DC component and normalize the result to obtain $x_{demod}[n]$.
+  \item Estimate and plot $R_{demod}[\ell]$ and $S_{demod}(f)$.
+  \item Compute
+  \[
+    \rho = \mathrm{corr}(x_1, x_{demod}),
+    \qquad
+    \mathrm{NMSE} =
+    \frac{\mathbb{E}\!\left[(x_1 - x_{demod})^2\right]}{\sigma_{x_1}^2},
+    \qquad
+    \mathrm{SNR} = -10 \log_{10}(\mathrm{NMSE})\ \mathrm{dB}.
+  \]
+\end{itemize}
+
+\subsection*{Comparison and Analysis}
+\begin{itemize}[leftmargin=1.5em]
+  \item Compare $x_1[n]$ and $x_{demod}[n]$ in time and frequency.
+  \item Compare $R_{x_1x_1}[\ell]$ with $R_{demod}[\ell]$.
+  \item Compare $S_{x_1x_1}(f)$ with $S_{demod}(f)$.
+  \item Discuss sidebands, envelope positivity, and demodulation error.
+\end{itemize}
+
+\section*{Required Deliverables}
+The submission must contain:
+\begin{enumerate}[leftmargin=1.5em]
+  \item the executed notebook,
+  \item this PDF guide,
+  \item the following figures inside the notebook:
+  \begin{itemize}[leftmargin=1.5em]
+    \item Stage 0 ACF and PSD,
+    \item Stage 1 ACF and PSD with theoretical overlays,
+    \item Stage 2 waveform, ACF, and PSD,
+    \item Stage 3 detection and recovery plots,
+    \item modulation-index analysis with four subplots,
+    \item error analysis with four subplots,
+    \item comprehensive comparison with a $2\times2$ layout.
+  \end{itemize}
+  \item the reported metrics:
+  \begin{itemize}[leftmargin=1.5em]
+    \item $\mu_{peak}$ and $\mu_{rms}$,
+    \item $\rho$,
+    \item NMSE,
+    \item SNR in dB,
+    \item power efficiency
+    \[
+      \eta = \frac{\mu_{rms}^2}{1 + \mu_{rms}^2} \times 100\%.
+    \]
+  \end{itemize}
+\end{enumerate}
+
+\section*{Validation Notes}
+This guide intentionally keeps the original notation and stage names from the
+lab PDF while making the contract explicit:
+\begin{itemize}[leftmargin=1.5em]
+  \item the AM chain is conventional AM, not DSB-SC,
+  \item the detector is full-wave rectification plus low-pass filtering,
+  \item the comparison signal is $x_1[n]$,
+  \item the recovered output is $x_{demod}[n]$ after DC removal and normalization.
+\end{itemize}
+
+\end{document}
